@@ -43,6 +43,7 @@ fn test_table_derive_macro() {
             }
         }
     }
+
     let mut larry = Person {
         id: None,
         name: String::from("larry"),
@@ -55,17 +56,39 @@ fn test_table_derive_macro() {
     Person::create_table(&conn).unwrap();
 
     larry.insert(&conn).unwrap();
-    let larry_id = larry.id.unwrap();
+    let larry_id = larry.id.expect("After (mutable) insertion, id should not be None");
 
-    let larry_copy = Person::get_by_id(&conn, larry_id).unwrap();
-    assert_eq!(larry_copy, Some(larry.clone()));
+    larry.age += 1;
+    let updated_something = larry.update(&conn).expect("Updating should work");
+    assert!(updated_something, "Should have updated a row");
 
-    let deleted_something = larry.delete(&conn).unwrap();
+    let larry_copy = Person::get_by_id(&conn, larry_id).expect("Querying a row should work");
+    assert_eq!(larry_copy, Some(larry.clone()), "Retrieving inserted row should give an identical row");
+
+    let deleted_something = larry.delete(&conn).expect("Deletion should work");
     // also works: `Person::delete_by_id(&conn, larry_id).unwrap();`
-    assert!(deleted_something);
+    assert!(deleted_something, "Should have deleted something");
 
-    let deleted_larry = Person::get_by_id(&conn, larry_id).unwrap();
-    assert_eq!(deleted_larry, None);
+    let deleted_larry = Person::get_by_id(&conn, larry_id).expect("Querying a deleted row should return Ok(None), not Err(_)");
+    assert_eq!(deleted_larry, None, "Received row that should have been deleted");
+
+    let id = larry.upsert(&conn).expect("Upsertion (insert) should work");
+    let larry_id = larry.id.expect("After (mutable) upsertion, id should not be None");
+
+    let larry_copy = Person::get_by_id(&conn, larry_id).expect("Querying a row should work");
+    assert_eq!(id, larry_id, "Upsert should return correct id");
+    assert_eq!(larry_copy, Some(larry.clone()), "Retrieving upserted row should give an identical row");
+
+    larry.age += 1;
+    let id = larry.upsert(&conn).expect("Upsertion (update) should work");
+    let larry_id = larry.id.expect("After (mutable) upsertion, id should not be None");
+    assert_eq!(id, larry_id, "Upsert should return correct id");
+
+    let larry_copy = Person::get_by_id(&conn, larry_id).expect("Querying a row should work");
+    assert_eq!(larry_copy, Some(larry.clone()), "Retrieving upserted row should give an identical row");
+
+    Person::drop_table(&conn).expect("Dropping table should work");
+    Person::drop_table(&conn).expect_err("Dropping previously dropped table should err");
 }
 
 
