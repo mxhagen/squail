@@ -4,8 +4,6 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields};
 
 // TODO: wrap functions in a trait
 
-// TODO: add sync function (set fields of self by querying db)
-
 // TODO: doc comments
 
 #[proc_macro_derive(Table)]
@@ -126,7 +124,7 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
     );
 
     let update_fn = quote! {
-        pub fn update(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<bool>
+        pub fn update(&self, conn: &rusqlite::Connection) -> rusqlite::Result<bool>
             where #(#to_sql_trait_bounds),*
         {
             if self.id.is_none() {
@@ -134,6 +132,22 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
             }
             let updated_count = conn.execute(#update_sql, rusqlite::params![#(#field_accessors),*])?;
             Ok(updated_count > 0)
+        }
+    };
+
+
+    let sync_fn = quote! {
+        pub fn sync(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<bool>
+            where #(#from_sql_trait_bounds),*
+        {
+            if self.id.is_none() {
+                return Ok(false);
+            }
+            match #struct_name::get_by_id(conn, self.id.unwrap())? {
+                Some(person) => *self = person,
+                _ => return Ok(false),
+            };
+            Ok(true)
         }
     };
 
@@ -197,6 +211,7 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
             #insert_fn
             #upsert_fn
             #update_fn
+            #sync_fn
             #get_by_id_fn
             #delete_fn
             #delete_by_id_fn

@@ -87,9 +87,20 @@ fn test_table_derive_macro() {
     let larry_copy = Person::get_by_id(&conn, larry_id).expect("Querying a row should work");
     assert_eq!(larry_copy, Some(larry.clone()), "Retrieving upserted row should give an identical row");
 
+    conn.execute("UPDATE Person SET (age) = (27) WHERE id = ?1", [larry_id])
+        .expect("Explicit Sqlite statement (not a library test) failed");
+
+    let found = larry.sync(&conn).expect("Syncing struct to existing row should succeed");
+    assert!(found, "Row should have been found");
+    assert_eq!(larry.age, 27, "Syncing struct to edited table row should work");
+
     Person::drop_table(&conn).expect("Dropping table should work");
     Person::drop_table(&conn).expect_err("Dropping previously dropped table should err");
+
+    let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='Person');", [], |row| row.get(0)).expect("Explicit Sqlite statement (not a library test) failed");
+    assert!(!exists, "Deleted table should not exist anymore but does");
 }
+
 
 
 // TODO: implement compile-error test(s) -- perhaps with `trybuild`?
