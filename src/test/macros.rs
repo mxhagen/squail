@@ -84,11 +84,14 @@ fn test_table_derive_macro() {
     let err = Person::get_by_id(&conn, larry_id)
         .expect_err("Querying a deleted row should Err(QueryReturnedNoRows)");
     assert_eq!(
-        err, rusqlite::Error::QueryReturnedNoRows,
+        err,
+        rusqlite::Error::QueryReturnedNoRows,
         "Received row that should have been deleted"
     );
 
-    let id = larry.update_or_insert(&conn).expect("Upsertion (insert) should work");
+    let id = larry
+        .update_or_insert(&conn)
+        .expect("Upsertion (insert) should work");
     let larry_id = larry
         .id
         .expect("After (mutable) upsertion, id should not be None");
@@ -102,7 +105,9 @@ fn test_table_derive_macro() {
     );
 
     larry.age += 1;
-    let id = larry.update_or_insert(&conn).expect("Upsertion (update) should work");
+    let id = larry
+        .update_or_insert(&conn)
+        .expect("Upsertion (update) should work");
     let larry_id = larry
         .id
         .expect("After (mutable) upsertion, id should not be None");
@@ -138,7 +143,6 @@ fn test_table_derive_macro() {
         )
         .expect("Explicit Sqlite statement (not a library test) failed");
     assert!(!exists, "Deleted table should not exist anymore but does");
-
 
     /// Another example struct to assure this works more than once
     #[derive(Table, Default)]
