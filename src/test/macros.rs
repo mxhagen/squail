@@ -67,8 +67,7 @@ fn test_table_derive_macro() {
         .expect("After (mutable) insertion, id should not be None");
 
     larry.age += 1;
-    let updated_something = larry.update(&conn).expect("Updating should work");
-    assert!(updated_something, "Should have updated a row");
+    larry.update(&conn).expect("Updating should work");
 
     let larry_copy = Person::get_by_id(&conn, larry_id).expect("Querying a row should work");
     assert_eq!(

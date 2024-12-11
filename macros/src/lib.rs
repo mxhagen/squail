@@ -3,7 +3,9 @@ use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{parse_macro_input, Data, DeriveInput, Fields};
 
-// TODO: wrap functions in a trait? would probably use the other crate
+// TODO: wrap functions in a trait? would probably use the other (main) crate
+
+// TODO: own error enum (for update). also use the other (main) crate for this
 
 
 #[proc_macro_derive(Table)]
@@ -116,10 +118,10 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
             match self.id {
                 None => self.insert(conn),
                 Some(id) => {
-                    if !self.update(conn)? {
-                        return self.insert(conn);
+                    match self.update(conn) {
+                        Ok(_) => return Ok(id),
+                        Err(_) => return self.insert(conn),
                     }
-                    Ok(id)
                 },
             }
         }
@@ -136,19 +138,21 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
     let update_fn = quote! {
         /// Update a table row using the calling struct instance.
         ///
-        /// If the row does not yet exist, this fails.
-        /// A version that inserts a new row instead also exists. See `update_or_insert`.
+        /// If `id` is `None`, this fails with `InvalidQuery`.
+        /// If the row does not exist, this fails with `QueryReturnedNoRows`.
         ///
-        /// Result contains `true` if a row was updated.
-        pub fn update(&self, conn: &rusqlite::Connection) -> rusqlite::Result<bool>
+        /// A version that inserts a new row instead also exists. See `update_or_insert`.
+        pub fn update(&self, conn: &rusqlite::Connection) -> rusqlite::Result<()>
             where #(#to_sql_trait_bounds),*
         {
             if self.id.is_none() {
-                // TODO: bad design, should probably fail instead
-                return Ok(false);
+                return Err(rusqlite::Error::InvalidQuery)
             }
             let updated_count = conn.execute(#update_sql, rusqlite::params![#(#field_accessors),*])?;
-            Ok(updated_count > 0)
+            match updated_count {
+                0 => Err(rusqlite::Error::QueryReturnedNoRows),
+                _ => Ok(()),
+            }
         }
     };
 
