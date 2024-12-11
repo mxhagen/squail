@@ -73,7 +73,7 @@ fn test_table_derive_macro() {
     let larry_copy = Person::get_by_id(&conn, larry_id).expect("Querying a row should work");
     assert_eq!(
         larry_copy,
-        Some(larry.clone()),
+        larry.clone(),
         "Retrieving inserted row should give an identical row"
     );
 
@@ -81,14 +81,14 @@ fn test_table_derive_macro() {
     // also works: `Person::delete_by_id(&conn, larry_id).unwrap();`
     assert!(deleted_something, "Should have deleted something");
 
-    let deleted_larry = Person::get_by_id(&conn, larry_id)
-        .expect("Querying a deleted row should return Ok(None), not Err(_)");
+    let err = Person::get_by_id(&conn, larry_id)
+        .expect_err("Querying a deleted row should Err(QueryReturnedNoRows)");
     assert_eq!(
-        deleted_larry, None,
+        err, rusqlite::Error::QueryReturnedNoRows,
         "Received row that should have been deleted"
     );
 
-    let id = larry.upsert(&conn).expect("Upsertion (insert) should work");
+    let id = larry.update_or_insert(&conn).expect("Upsertion (insert) should work");
     let larry_id = larry
         .id
         .expect("After (mutable) upsertion, id should not be None");
@@ -97,12 +97,12 @@ fn test_table_derive_macro() {
     assert_eq!(id, larry_id, "Upsert should return correct id");
     assert_eq!(
         larry_copy,
-        Some(larry.clone()),
+        larry.clone(),
         "Retrieving upserted row should give an identical row"
     );
 
     larry.age += 1;
-    let id = larry.upsert(&conn).expect("Upsertion (update) should work");
+    let id = larry.update_or_insert(&conn).expect("Upsertion (update) should work");
     let larry_id = larry
         .id
         .expect("After (mutable) upsertion, id should not be None");
@@ -111,7 +111,7 @@ fn test_table_derive_macro() {
     let larry_copy = Person::get_by_id(&conn, larry_id).expect("Querying a row should work");
     assert_eq!(
         larry_copy,
-        Some(larry.clone()),
+        larry.clone(),
         "Retrieving upserted row should give an identical row"
     );
 
@@ -138,6 +138,17 @@ fn test_table_derive_macro() {
         )
         .expect("Explicit Sqlite statement (not a library test) failed");
     assert!(!exists, "Deleted table should not exist anymore but does");
+
+
+    /// Another example struct to assure this works more than once
+    #[derive(Table, Default)]
+    #[allow(unused)]
+    struct Car {
+        id: Option<i64>,
+        name: String,
+        brand: String,
+        year: i32,
+    }
 }
 
 // TODO: implement compile-error test(s) -- perhaps with `trybuild`?

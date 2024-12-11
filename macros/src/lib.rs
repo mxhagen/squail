@@ -1,10 +1,12 @@
+use std::collections::HashMap;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{parse_macro_input, Data, DeriveInput, Fields};
 
-// TODO: wrap functions in a trait
+// TODO: wrap functions in a trait? would probably use the other crate
 
 // TODO: doc comments
+
 
 #[proc_macro_derive(Table)]
 pub fn derive_table(input: TokenStream) -> TokenStream {
@@ -29,8 +31,8 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
     let mut field_getters = Vec::new();
     let mut field_accessors = Vec::new();
 
-    let mut to_sql_trait_bounds = Vec::new();
-    let mut from_sql_trait_bounds = Vec::new();
+    let mut to_sql_trait_bounds = HashMap::new();
+    let mut from_sql_trait_bounds = HashMap::new();
 
     for field in fields.named.iter() {
         let field_name = field.ident.as_ref().unwrap();
@@ -40,8 +42,8 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
         field_getters.push(quote!(#field_name: row.get(stringify!(#field_name))?));
         field_accessors.push(quote!(self.#field_name));
 
-        to_sql_trait_bounds.push(quote!(#field_type: rusqlite::types::ToSql));
-        from_sql_trait_bounds.push(quote!(#field_type: rusqlite::types::FromSql));
+        to_sql_trait_bounds.insert(stringify!(#field_type), quote!(#field_type: rusqlite::types::ToSql));
+        from_sql_trait_bounds.insert(stringify!(#field_type), quote!(#field_type: rusqlite::types::FromSql));
 
         if field_name == "id" {
             if let syn::Type::Path(type_path) = field_type {
@@ -58,6 +60,9 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
             column_names.push(field_name.to_string());
         }
     }
+
+    let to_sql_trait_bounds = to_sql_trait_bounds.values().collect::<Vec<_>>();
+    let from_sql_trait_bounds = from_sql_trait_bounds.values().collect::<Vec<_>>();
 
     if !field_names.iter().map(|id| id.to_string()).any(|id| &id == "id") {
         panic!("Structs annotated with `Table` require a primary key field `id: Option<i64>`.");
@@ -92,6 +97,7 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
             where #(#to_sql_trait_bounds),*
         {
             conn.execute(#insert_sql, rusqlite::params![#(#field_accessors),*])?;
+            // TODO: test this with manually set id. also test that this can't update!!!
             let id = conn.last_insert_rowid();
             self.id = Some(id);
             Ok(id)
@@ -99,8 +105,8 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
     };
 
 
-    let upsert_fn = quote! {
-        pub fn upsert(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<i64>
+    let update_or_insert_fn = quote! {
+        pub fn update_or_insert(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<i64>
             where #(#to_sql_trait_bounds),*
         {
             match self.id {
@@ -128,6 +134,7 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
             where #(#to_sql_trait_bounds),*
         {
             if self.id.is_none() {
+                // TODO: bad design, should probably fail instead
                 return Ok(false);
             }
             let updated_count = conn.execute(#update_sql, rusqlite::params![#(#field_accessors),*])?;
@@ -143,17 +150,31 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
             if self.id.is_none() {
                 return Ok(false);
             }
-            match #struct_name::get_by_id(conn, self.id.unwrap())? {
-                Some(person) => *self = person,
-                _ => return Ok(false),
-            };
-            Ok(true)
+            match #struct_name::get_by_id(conn, self.id.unwrap()) {
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+                Ok(person) => {
+                    *self = person;
+                    Ok(true)
+                },
+                Err(e) => Err(e),
+            }
+        }
+    };
+
+
+    let from_sql_row_fn = quote! {
+        pub fn from_sql_row(row: &rusqlite::Row) -> rusqlite::Result<Self>
+        where
+            Self: Sized,
+            #(#from_sql_trait_bounds),*
+        {
+            Ok(Self { #(#field_getters),* })
         }
     };
 
 
     let get_by_id_fn = quote! {
-        pub fn get_by_id(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Option<Self>>
+        pub fn get_by_id(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Self>
         where
             Self: Sized,
             #(#from_sql_trait_bounds),*
@@ -162,18 +183,16 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
             let mut rows = stmt.query(rusqlite::params![id])?;
 
             if let Some(row) = rows.next()? {
-                Ok(Some(Self { #(#field_getters),* }))
+                Self::from_sql_row(row)
             } else {
-                Ok(None)
+                Err(rusqlite::Error::QueryReturnedNoRows)
             }
         }
     };
 
 
     let delete_fn = quote! {
-        pub fn delete(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<bool>
-            where #(#to_sql_trait_bounds),*
-        {
+        pub fn delete(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<bool> {
             if self.id.is_none() {
                 return Ok(false);
             }
@@ -209,9 +228,10 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
         impl #struct_name {
             #create_table_fn
             #insert_fn
-            #upsert_fn
+            #update_or_insert_fn
             #update_fn
             #sync_fn
+            #from_sql_row_fn
             #get_by_id_fn
             #delete_fn
             #delete_by_id_fn
