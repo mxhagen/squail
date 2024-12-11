@@ -5,8 +5,6 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields};
 
 // TODO: wrap functions in a trait? would probably use the other crate
 
-// TODO: doc comments
-
 
 #[proc_macro_derive(Table)]
 pub fn derive_table(input: TokenStream) -> TokenStream {
@@ -76,6 +74,8 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
     );
 
     let create_table_fn = quote! {
+        /// Use a `Connection` to create a table named after the struct (`#struct_name`)
+        /// If the table already exists, this returns `Ok(())` and does nothing.
         pub fn create_table(conn: &rusqlite::Connection) -> rusqlite::Result<()>
             where #(#to_sql_trait_bounds),*
         {
@@ -93,6 +93,8 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
     );
 
     let insert_fn = quote! {
+        /// Insert struct instance into the table, setting `self.id` to
+        /// `Some(last_insert_rowid())` if it was `None`.
         pub fn insert(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<i64>
             where #(#to_sql_trait_bounds),*
         {
@@ -106,6 +108,8 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
 
 
     let update_or_insert_fn = quote! {
+        /// Update a table row using the calling struct instance.
+        /// If the row does not yet exist, it is inserted into the table.
         pub fn update_or_insert(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<i64>
             where #(#to_sql_trait_bounds),*
         {
@@ -130,6 +134,12 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
     );
 
     let update_fn = quote! {
+        /// Update a table row using the calling struct instance.
+        ///
+        /// If the row does not yet exist, this fails.
+        /// A version that inserts a new row instead also exists. See `update_or_insert`.
+        ///
+        /// Result contains `true` if a row was updated.
         pub fn update(&self, conn: &rusqlite::Connection) -> rusqlite::Result<bool>
             where #(#to_sql_trait_bounds),*
         {
@@ -144,6 +154,12 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
 
 
     let sync_fn = quote! {
+        /// Sync a struct instance with the database state.
+        /// This "updates" the structs fields using its database entry.
+        ///
+        /// Result contains `false` if `self.id == None` or if no row with that `id` was found.
+        ///
+        /// To update database entry using the structs fields, see `update`.
         pub fn sync(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<bool>
             where #(#from_sql_trait_bounds),*
         {
@@ -163,6 +179,7 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
 
 
     let from_sql_row_fn = quote! {
+        /// Convert a `rusqlite::Row` received through a query to an instance of the struct
         pub fn from_sql_row(row: &rusqlite::Row) -> rusqlite::Result<Self>
         where
             Self: Sized,
@@ -174,6 +191,7 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
 
 
     let get_by_id_fn = quote! {
+        /// Get a person from the table using their `id` (corresponding to the sqlite rowid)
         pub fn get_by_id(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Self>
         where
             Self: Sized,
@@ -192,6 +210,10 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
 
 
     let delete_fn = quote! {
+        /// Delete row corresponding to the struct instance from the database.
+        /// Deletes the entry with rowid equal to `self.id` without further checks.
+        ///
+        /// Result contains `true` if a row was deleted.
         pub fn delete(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<bool> {
             if self.id.is_none() {
                 return Ok(false);
@@ -206,6 +228,9 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
     };
 
     let delete_by_id_fn = quote! {
+        /// Delete a row from the database by rowid.
+        ///
+        /// Result contains `true` if a row was deleted.
         pub fn delete_by_id(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<()> {
             conn.execute(&format!(
                     "DELETE FROM {} WHERE id = ?",
@@ -217,6 +242,7 @@ pub fn derive_table(input: TokenStream) -> TokenStream {
 
 
     let drop_table_fn = quote! {
+        /// Use a `Connection` to drop the table named after the struct (`#struct_name`)
         pub fn drop_table(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
             conn.execute(&format!("DROP TABLE {}", #table_name), [])?;
             Ok(())
